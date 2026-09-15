@@ -1,7 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database.connection import Base
+
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 
 class Webhook(Base):
@@ -15,8 +19,8 @@ class Webhook(Base):
     idempotency_key = Column(String(100), unique=True, index=True, nullable=True)
     status = Column(String(20), default="pending", index=True)
     attempts = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     deliveries = relationship(
         "WebhookDelivery",
@@ -41,8 +45,8 @@ class WebhookDelivery(Base):
     response_body = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
     duration_ms = Column(Integer, nullable=True)
-    started_at = Column(DateTime, default=datetime.utcnow)
-    completed_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, default=utc_now)
+    completed_at = Column(DateTime, default=utc_now)
 
     webhook = relationship("Webhook", back_populates="deliveries")
 

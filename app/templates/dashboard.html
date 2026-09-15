@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webhook Delivery Engine | Live Observability Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #0a0d14;
+            --bg-card: rgba(18, 24, 38, 0.7);
+            --bg-card-hover: rgba(26, 34, 54, 0.85);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-glow: rgba(99, 102, 241, 0.3);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-primary: #6366f1;
+            --accent-primary-hover: #4f46e5;
+            --status-delivered: #10b981;
+            --status-delivered-bg: rgba(16, 185, 129, 0.12);
+            --status-retrying: #f59e0b;
+            --status-retrying-bg: rgba(245, 158, 11, 0.12);
+            --status-failed: #ef4444;
+            --status-failed-bg: rgba(239, 68, 68, 0.12);
+            --status-queued: #3b82f6;
+            --status-queued-bg: rgba(59, 130, 246, 0.12);
+            --status-processing: #8b5cf6;
+            --status-processing-bg: rgba(139, 92, 246, 0.12);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            min-height: 100vh;
+            background-image: 
+                radial-gradient(circle at 15% 10%, rgba(99, 102, 241, 0.12) 0%, transparent 40%),
+                radial-gradient(circle at 85% 90%, rgba(16, 185, 129, 0.08) 0%, transparent 40%);
+            background-attachment: fixed;
+            padding: 2rem 1.5rem;
+        }
+
+        .container {
+            max-width: 1380px;
+            margin: 0 auto;
+        }
+
+        /* Top Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+        }
+
+        .brand-icon {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, #6366f1 0%, #3b82f6 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+        }
+
+        .brand h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .brand p {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .badge-live {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.35rem 0.85rem;
+            border-radius: 999px;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #34d399;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #10b981;
+            box-shadow: 0 0 10px #10b981;
+            animation: pulse 1.8s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1.1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        /* Metric Cards */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .metric-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            padding: 1.25rem;
+            backdrop-filter: blur(12px);
+            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--border-glow);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+        }
+
+        .metric-label {
+            font-size: 0.78rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .metric-value {
+            font-size: 1.9rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            color: var(--text-primary);
+        }
+
+        .metric-subtext {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.35rem;
+        }
+
+        /* Controls / Dispatch Section */
+        .control-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 2rem;
+            backdrop-filter: blur(12px);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .control-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.55rem 1.1rem;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
+            color: white;
+            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.3);
+        }
+
+        .btn-primary:hover {
+            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.5);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-warning {
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: #fbbf24;
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #f87171;
+        }
+
+        /* Table Card */
+        .table-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            overflow: hidden;
+            backdrop-filter: blur(12px);
+        }
+
+        .table-header {
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .table-header h2 {
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 0.85rem 1.25rem;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        td {
+            padding: 0.95rem 1.25rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            font-size: 0.85rem;
+        }
+
+        tr:hover td {
+            background: var(--bg-card-hover);
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.25rem 0.65rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .status-delivered { background: var(--status-delivered-bg); color: var(--status-delivered); }
+        .status-retrying { background: var(--status-retrying-bg); color: var(--status-retrying); }
+        .status-failed { background: var(--status-failed-bg); color: var(--status-failed); }
+        .status-queued { background: var(--status-queued-bg); color: var(--status-queued); }
+        .status-processing { background: var(--status-processing-bg); color: var(--status-processing); }
+
+        .code-pill {
+            font-family: 'JetBrains Mono', monospace;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.2rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            color: #cbd5e1;
+        }
+
+        /* Modal */
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(8px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 1.5rem;
+        }
+
+        .modal {
+            background: #111827;
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            width: 100%;
+            max-width: 700px;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+            padding: 2rem;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 1rem;
+        }
+
+        .modal-close {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+
+        .modal-close:hover { color: white; }
+
+        .timeline-item {
+            position: relative;
+            padding-left: 2rem;
+            margin-bottom: 1.5rem;
+            border-left: 2px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .timeline-dot {
+            position: absolute;
+            left: -7px;
+            top: 4px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #6366f1;
+        }
+
+        .timeline-dot.delivered { background: #10b981; }
+        .timeline-dot.failed { background: #ef4444; }
+
+        .timeline-title {
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .timeline-meta {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
+        .timeline-box {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            padding: 0.75rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.78rem;
+            color: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="brand">
+                <div class="brand-icon">⚡</div>
+                <div>
+                    <h1>Webhook Delivery & Retry Engine</h1>
+                    <p>Distributed Asynchronous Dispatch & Observability</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <span class="badge-live">
+                    <span class="pulse-dot"></span>
+                    Engine Active
+                </span>
+                <button class="btn btn-secondary" onclick="fetchLiveUpdates()">🔄 Refresh</button>
+            </div>
+        </header>
+
+        <!-- Metrics Grid -->
+        <section class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-label">Total Webhooks</div>
+                <div class="metric-value" id="m-total">{{ metrics.total_webhooks }}</div>
+                <div class="metric-subtext">Events ingested</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Delivered</div>
+                <div class="metric-value" style="color: #34d399;" id="m-delivered">{{ metrics.delivered }}</div>
+                <div class="metric-subtext">{{ metrics.success_rate_percent }}% Success rate</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Retrying</div>
+                <div class="metric-value" style="color: #fbbf24;" id="m-retrying">{{ metrics.retrying }}</div>
+                <div class="metric-subtext">Backoff in progress</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Failed</div>
+                <div class="metric-value" style="color: #f87171;" id="m-failed">{{ metrics.failed }}</div>
+                <div class="metric-subtext">Max retries reached</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">In Queue / Processing</div>
+                <div class="metric-value" style="color: #60a5fa;" id="m-queued">{{ metrics.queued + metrics.processing }}</div>
+                <div class="metric-subtext">Pending worker pickup</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Total Attempts</div>
+                <div class="metric-value" id="m-attempts">{{ metrics.total_attempts }}</div>
+                <div class="metric-subtext">HTTP dispatch executions</div>
+            </div>
+        </section>
+
+        <!-- Test Dispatch Simulator -->
+        <section class="control-panel">
+            <div>
+                <div class="control-title">🧪 Quick Scenario Dispatcher</div>
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">
+                    Trigger test webhooks directly to demonstrate asynchronous retries & HMAC security
+                </div>
+            </div>
+            <div class="button-group">
+                <button class="btn btn-primary" onclick="sendTestWebhook('http://127.0.0.1:9000/success', 'Order Placed #101')">
+                    🚀 Success (200)
+                </button>
+                <button class="btn btn-warning" onclick="sendTestWebhook('http://127.0.0.1:9000/flaky', 'Payment Verification #202')">
+                    🔁 Flaky (Retry Demo)
+                </button>
+                <button class="btn btn-danger" onclick="sendTestWebhook('http://127.0.0.1:9000/fail', 'Subscription Sync #303')">
+                    ❌ Failure (500)
+                </button>
+                <button class="btn btn-secondary" onclick="sendTestWebhook('http://127.0.0.1:9000/slow', 'Inventory Sync #404')">
+                    ⏱️ Timeout (Slow)
+                </button>
+            </div>
+        </section>
+
+        <!-- Recent Webhooks Table -->
+        <section class="table-card">
+            <div class="table-header">
+                <h2>Recent Webhooks</h2>
+                <span style="font-size: 0.8rem; color: var(--text-muted);">Auto-refreshes every 3 seconds</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Message Payload</th>
+                        <th>Target Destination</th>
+                        <th>Status</th>
+                        <th>Attempts</th>
+                        <th>Timestamp</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="webhooks-table-body">
+                    {% for w in webhooks %}
+                    <tr id="row-{{ w.id }}">
+                        <td class="code-pill">#{{ w.id }}</td>
+                        <td style="font-weight: 500;">{{ w.message }}</td>
+                        <td class="code-pill">{{ w.target_url }}</td>
+                        <td>
+                            <span class="status-badge status-{{ w.status }}">{{ w.status }}</span>
+                        </td>
+                        <td>{{ w.attempts }}</td>
+                        <td style="color: var(--text-muted);">{{ w.created_at.strftime('%H:%M:%S') if w.created_at else '' }}</td>
+                        <td>
+                            <button class="btn btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.78rem;" onclick="openDetailModal({{ w.id }})">
+                                Timeline 🔍
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+    </div>
+
+    <!-- Webhook Detail & Timeline Modal -->
+    <div class="modal-backdrop" id="modal-backdrop" onclick="closeModalOnBg(event)">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modal-title">Webhook # Details</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div id="modal-content">
+                Loading timeline...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function sendTestWebhook(targetUrl, msg) {
+            try {
+                const response = await fetch('/webhooks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: msg,
+                        target_url: targetUrl,
+                        event_type: "test.event"
+                    })
+                });
+                const data = await response.json();
+                console.log("Enqueued:", data);
+                fetchLiveUpdates();
+            } catch (err) {
+                alert("Failed to enqueue webhook: " + err);
+            }
+        }
+
+        async function fetchLiveUpdates() {
+            try {
+                // Fetch metrics
+                const resMetrics = await fetch('/webhooks/metrics');
+                const metrics = await resMetrics.json();
+                document.getElementById('m-total').innerText = metrics.total_webhooks;
+                document.getElementById('m-delivered').innerText = metrics.delivered;
+                document.getElementById('m-retrying').innerText = metrics.retrying;
+                document.getElementById('m-failed').innerText = metrics.failed;
+                document.getElementById('m-queued').innerText = metrics.queued + metrics.processing;
+                document.getElementById('m-attempts').innerText = metrics.total_attempts;
+
+                // Fetch webhooks
+                const resWebhooks = await fetch('/webhooks?limit=30');
+                const webhooks = await resWebhooks.json();
+                const tbody = document.getElementById('webhooks-table-body');
+                tbody.innerHTML = webhooks.map(w => `
+                    <tr id="row-${w.id}">
+                        <td class="code-pill">#${w.id}</td>
+                        <td style="font-weight: 500;">${w.message}</td>
+                        <td class="code-pill">${w.target_url}</td>
+                        <td><span class="status-badge status-${w.status}">${w.status}</span></td>
+                        <td>${w.attempts}</td>
+                        <td style="color: var(--text-muted);">${w.created_at ? new Date(w.created_at).toLocaleTimeString() : ''}</td>
+                        <td>
+                            <button class="btn btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.78rem;" onclick="openDetailModal(${w.id})">
+                                Timeline 🔍
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error("Auto refresh error:", err);
+            }
+        }
+
+        async function openDetailModal(webhookId) {
+            document.getElementById('modal-backdrop').style.display = 'flex';
+            document.getElementById('modal-title').innerText = `Webhook #${webhookId} Attempt Timeline`;
+            const content = document.getElementById('modal-content');
+            content.innerHTML = `<div style="text-align: center; color: var(--text-muted);">Fetching delivery history...</div>`;
+
+            try {
+                const res = await fetch(`/webhooks/${webhookId}`);
+                const data = await res.json();
+                
+                let timelineHtml = `
+                    <div style="margin-bottom: 1.5rem; background: rgba(255,255,255,0.03); padding: 1rem; border-radius: 10px;">
+                        <p><strong>Destination:</strong> <span class="code-pill">${data.target_url}</span></p>
+                        <p style="margin-top: 0.4rem;"><strong>Payload:</strong> ${data.message}</p>
+                        <p style="margin-top: 0.4rem;"><strong>Final Status:</strong> <span class="status-badge status-${data.status}">${data.status}</span></p>
+                    </div>
+                    <h4 style="margin-bottom: 1rem;">Execution History</h4>
+                `;
+
+                if (!data.deliveries || data.deliveries.length === 0) {
+                    timelineHtml += `<p style="color: var(--text-muted);">No attempts recorded yet (pending worker execution).</p>`;
+                } else {
+                    data.deliveries.forEach(del => {
+                        timelineHtml += `
+                            <div class="timeline-item">
+                                <div class="timeline-dot ${del.status}"></div>
+                                <div class="timeline-title">Attempt #${del.attempt_number} — <span style="text-transform: capitalize; color: ${del.status === 'delivered' ? '#34d399' : '#f87171'}">${del.status}</span></div>
+                                <div class="timeline-meta">Response: HTTP ${del.response_status_code || 'None'} • Latency: ${del.duration_ms || 0}ms • ${new Date(del.started_at).toLocaleTimeString()}</div>
+                                <div class="timeline-box">
+                                    ${del.error_message ? `<strong>Error:</strong> ${del.error_message}<br>` : ''}
+                                    ${del.response_body ? `<strong>Response:</strong> ${del.response_body}` : 'No body'}
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+
+                timelineHtml += `
+                    <div style="margin-top: 1.5rem; text-align: right;">
+                        <button class="btn btn-primary" onclick="retryWebhook(${data.id})">🔁 Re-deliver Webhook</button>
+                    </div>
+                `;
+
+                content.innerHTML = timelineHtml;
+            } catch (err) {
+                content.innerHTML = `<p style="color: #f87171;">Failed to load details: ${err}</p>`;
+            }
+        }
+
+        async function retryWebhook(webhookId) {
+            try {
+                await fetch(`/webhooks/${webhookId}/retry`, { method: 'POST' });
+                alert(`Webhook #${webhookId} re-enqueued for delivery!`);
+                closeModal();
+                fetchLiveUpdates();
+            } catch (err) {
+                alert("Retry error: " + err);
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('modal-backdrop').style.display = 'none';
+        }
+
+        function closeModalOnBg(e) {
+            if (e.target.id === 'modal-backdrop') {
+                closeModal();
+            }
+        }
+
+        // Live refresh every 3 seconds
+        setInterval(fetchLiveUpdates, 3000);
+    </script>
+</body>
+</html>

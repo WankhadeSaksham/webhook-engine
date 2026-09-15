@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     app_port: int = 8000
     
     # Database
-    database_url: str = "postgresql://postgres:Doremon@123@localhost:5432/webhook_engine"
+    database_url: str = "postgresql://postgres:Doremon%40123@localhost:5432/webhook_engine"
     
     # Redis & Broker
     redis_url: str = "redis://localhost:6379/0"

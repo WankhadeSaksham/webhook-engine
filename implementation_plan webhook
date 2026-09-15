@@ -1,0 +1,201 @@
+# Architecture Assessment & Implementation Plan: Reliable Webhook Delivery & Retry Engine
+
+## Project Overview
+The goal is to build an enterprise-grade, distributed **Webhook Delivery & Retry Engine**.
+It accepts incoming webhook dispatch requests, persists them safely in PostgreSQL, decouples delivery through Redis & Celery asynchronous background workers, implements exponential backoff retries with full attempt tracking, secures payloads via HMAC signatures, ensures idempotency, and provides real-time observability via a clean web dashboard and an AI failure prediction model.
+
+---
+
+## 1. Existing Codebase Assessment (What We Have Today)
+
+We thoroughly inspected the workspace at `c:\Users\Saksham Wankhade\Documents\webhook-engine`. Here is the current state:
+
+### Current Files
+1. **[database.py](file:///c:/Users/Saksham%20Wankhade/Documents/webhook-engine/database.py)**:
+   - A basic script connecting to local PostgreSQL (`localhost:5432`, db: `webhook_engine`, user: `postgres`) using `psycopg2`.
+   - Credentials are hardcoded.
+2. **[test_database.py](file:///c:/Users/Saksham%20Wankhade/Documents/webhook-engine/test_database.py)**:
+   - Verifies raw SQL insertion into `webhooks` table.
+3. **[receiver/main.py](file:///c:/Users/Saksham%20Wankhade/Documents/webhook-engine/receiver/main.py)**:
+   - Minimal FastAPI server running on port 9000 with a generic `GET /` and `POST /` webhook receiver.
+4. **[sender/main.py](file:///c:/Users/Saksham%20Wankhade/Documents/webhook-engine/sender/main.py)**:
+   - A single synchronous script performing:
+     - SQL insertion of a webhook.
+     - Synchronous HTTP POST to `http://127.0.0.1:9000` via `requests`.
+     - In-process `for attempt in range(1, 4):` loop with hardcoded `time.sleep(2)`.
+     - Updating `attempts` and `status` (`delivered` or `failed`) directly in `webhooks`.
+     - Exits.
+
+### Current Database State
+- PostgreSQL is active on port 5432 with database `webhook_engine`.
+- `webhooks` table exists with 5 rows:
+  ```sql
+  CREATE TABLE webhooks (
+      id SERIAL PRIMARY KEY,
+      message TEXT NOT NULL,
+      status VARCHAR(20) DEFAULT 'pending',
+      attempts INT DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+  ```
+
+### Current Infrastructure State
+- **Virtual Environment (`venv`)**: Active. Contains `fastapi`, `uvicorn`, `psycopg2-binary`, `requests`, `pydantic`.
+- **Missing Dependencies**: `redis`, `celery`, `python-dotenv`, `pytest`, `sqlalchemy` (or structured psycopg pool).
+- **Docker Desktop**: Installed at `C:\Users\Saksham Wankhade\AppData\Local\Programs\DockerDesktop\Docker Desktop.exe`, but currently stopped. Redis container needs Docker running or local service.
+- **Git Repository**: Currently Git is tracking from parent `C:\Users\Saksham Wankhade\Documents`. We should isolate a git repo inside `webhook-engine` with `.gitignore`.
+
+---
+
+## 2. Architectural Deficits & What Needs to Change
+
+| Feature | Current Implementation | Target Production Architecture |
+|---|---|---|
+| **API Server** | None (only sender script) | FastAPI `POST /webhooks` returning `202 Accepted` or `201 Created` immediately with job ID |
+| **Worker Decoupling** | Synchronous thread loop | Celery worker consuming tasks from Redis queues |
+| **Persistence** | Raw psycopg2 with hardcoded SQL | SQLAlchemy / robust connection pool with migrations & schema extension |
+| **Schema** | Missing `target_url`, `idempotency_key`, `event_type`, `headers` | Non-destructive schema migration adding required fields + `webhook_deliveries` attempts table |
+| **Retry Strategy** | Blocking `time.sleep(2)` | Celery native exponential backoff with jitter and configurable retry limits (`countdown=base * (2 ** retry)`) |
+| **Attempt Tracking** | Overwrites `attempts` count only | Detailed audit table (`webhook_deliveries`) recording timestamps, status code, latency (ms), and error trace |
+| **Security** | None | HMAC SHA256 signature header (`X-Webhook-Signature`) with shared secret verification |
+| **Idempotency** | Duplicate payloads create multiple deliveries | Idempotency keys (`Idempotency-Key` or `event_id`) to deduplicate rapid dispatch requests |
+| **Observability** | Console print statements | Python structured logging + modern live dashboard |
+| **Configuration** | Hardcoded passwords in source files | Centralized `.env` and `app/config.py` using Pydantic Settings |
+
+---
+
+## 3. Incremental Phase Roadmap
+
+Per your instructions, **we will NOT build everything at once**. We will implement step-by-step, explaining each decision casually and clearly ("bro-style" explanations with high-grade engineering quality).
+
+### Phase 1: Environment, Git & Configuration Foundation
+- Isolate git repository in `webhook-engine` and add `.gitignore`.
+- Create `.env` and `.env.example` with database URLs, Redis URLs, retry configs, timeouts, and HMAC secrets.
+- Install necessary dependencies (`redis`, `celery`, `python-dotenv`, `pytest`, `sqlalchemy`).
+- Create `app/config.py` to safely load environment variables without leaking credentials.
+
+### Phase 2: Clean Project Structure & Modular Database Layer
+- Refactor the code into the target clean folder structure:
+  ```text
+  webhook-engine/
+  ├── app/
+  │   ├── main.py
+  │   ├── config.py
+  │   ├── api/
+  │   │   ├── webhooks.py
+  │   │   └── dashboard.py
+  │   ├── models/
+  │   │   ├── webhook.py
+  │   │   └── delivery.py
+  │   ├── schemas/
+  │   │   └── webhook.py
+  │   ├── services/
+  │   │   ├── webhook_service.py
+  │   │   └── delivery_service.py
+  │   ├── workers/
+  │   │   ├── celery_app.py
+  │   │   └── tasks.py
+  │   ├── database/
+  │   │   └── connection.py
+  │   └── utils/
+  │       ├── logging.py
+  │       └── security.py
+  ├── receiver/
+  │   └── main.py
+  ├── static/ & templates/
+  ├── tests/
+  ├── docker-compose.yml
+  └── requirements.txt
+  ```
+- Non-destructive database migration:
+  - Add `target_url`, `idempotency_key`, `updated_at` to `webhooks`.
+  - Create `webhook_deliveries` table for granular attempt tracking.
+
+### Phase 3: Webhook API (FastAPI)
+- Build `POST /webhooks` endpoint.
+- Validates target URL, message payload, and optional idempotency key.
+- Saves webhook with initial status `pending` / `queued`.
+- Returns immediate JSON response: `{"id": 123, "status": "queued"}` in < 20ms without waiting for target URL response.
+
+### Phase 4 & 5: Redis & Celery Worker Integration
+- Start Docker Desktop and ensure Redis is listening on `localhost:6379`.
+- Configure `celery_app.py` with Redis broker.
+- Create Celery task `deliver_webhook_task(webhook_id)`.
+- Configure Windows-compatible Celery concurrency (e.g. `--pool=solo` or `threads` for Windows environments).
+
+### Phase 6 & 7: Asynchronous HTTP Delivery & Exponential Backoff
+- Worker performs HTTP POST with timeouts (connection 5s, read 10s).
+- Implements exponential backoff:
+  - Base delay: 2s
+  - Backoff: `2s -> 4s -> 8s` up to `MAX_RETRIES`.
+  - Proper status transitions: `pending -> queued -> processing -> delivered | retrying -> failed`.
+
+### Phase 8: Comprehensive Delivery History Tracking
+- On every attempt (success or failure), insert a row into `webhook_deliveries`:
+  - `webhook_id`, `attempt_number`, `response_status_code`, `error_message`, `duration_ms`, `timestamp`.
+
+### Phase 9: Idempotency Strategy
+- Enforce idempotency on `POST /webhooks`:
+  - If client sends same `idempotency_key`, return existing webhook record instead of re-enqueuing duplicates.
+- Worker sends stable `X-Webhook-ID` header so receivers can deduplicate.
+
+### Phase 10: HMAC Signature Security
+- Compute `HMAC-SHA256` of raw payload using `WEBHOOK_SECRET`.
+- Worker sends `X-Webhook-Signature: sha256=<hex_digest>` and `X-Webhook-Timestamp`.
+- Provide receiver utility to verify signature authenticity.
+
+### Phase 11: Enhanced Receiver Test Server
+- Update `receiver/main.py` with test endpoints:
+  - `/success`: returns `200 OK`
+  - `/fail`: returns `500 Internal Server Error`
+  - `/slow`: sleeps 6s to trigger timeout testing
+  - `/flaky`: fails first 2 times, then succeeds on 3rd attempt (proves retry mechanism!)
+
+### Phase 12: Real-time Observability Dashboard
+- Modern, clean FastAPI + HTML/CSS dashboard:
+  - Metric cards: Total webhooks, Queued, Processing, Delivered, Retrying, Failed.
+  - Recent webhooks list with status badges.
+  - Detailed modal / page for each webhook showing full attempt history timeline.
+
+### Phase 13: Automated Testing Suite
+- Pytest test cases covering:
+  - API validation & enqueueing.
+  - Delivery success & failure handling.
+  - Backoff retry calculation.
+  - Idempotency deduplication.
+  - HMAC signature generation & verification.
+
+### Phase 14: Docker & Docker Compose
+- Containerize the API, Worker, Receiver, and Dashboard with Docker Compose.
+
+### Phase 15: AI / ML Webhook Failure Prediction
+- Collect delivery features (target domain, payload size, time of day, recent endpoint failure rate).
+- Train an interpretable Scikit-learn model (LogisticRegression / RandomForest) to compute failure risk score and recommend dynamic backoff delays.
+
+### Phase 16: Documentation & Production Polish
+- Comprehensive `README.md` with architectural diagrams, CLI examples, setup guide, and troubleshooting.
+
+---
+
+## 4. User Review Required
+
+> [!IMPORTANT]
+> **Windows Celery Behavior**:
+> Celery on Windows requires the solo pool (`celery -A app.workers.celery_app worker -l info -P solo`) or gevent/eventlet because Windows lacks Unix `fork()`. We will configure this so it works smoothly on your Windows 11 machine without weird multiprocessing crashes.
+
+> [!IMPORTANT]
+> **Docker Desktop Status**:
+> Docker Desktop is currently stopped on your machine. For Phase 4, we will need Docker running to host the Redis container (or we can launch Docker Desktop). We will alert you right before Phase 4.
+
+> [!NOTE]
+> **Backward Compatibility**:
+> Your existing `webhooks` table data will NOT be deleted. We will write an `ALTER TABLE` script to add `target_url` (with default value `http://127.0.0.1:9000`) and the new tracking tables so your existing 5 rows stay intact!
+
+---
+
+## 5. Next Immediate Step (Upon Your Approval)
+Once you approve this plan, we will start with **Phase 1**:
+1. Isolate the Git repository inside `webhook-engine` with a clean `.gitignore`.
+2. Set up `requirements.txt` and install `redis`, `celery`, `python-dotenv`, `pytest`, `sqlalchemy`.
+3. Create `.env` and `.env.example` with safe configuration.
+4. Verify the environment with you before proceeding to Phase 2.
