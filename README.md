@@ -87,7 +87,7 @@ APP_ENV=development
 APP_PORT=8000
 
 # Database Configuration (PostgreSQL)
-DATABASE_URL=postgresql://postgres:Doremon%40123@localhost:5432/webhook_engine
+DATABASE_URL=postgresql://postgres:YOURPASSWORD@localhost:5432/webhook_engine
 
 # Message Broker (Redis)
 REDIS_URL=redis://localhost:6379/0
