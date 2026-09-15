@@ -8,7 +8,7 @@ connection = psycopg2.connect(
     host="localhost",
     database="webhook_engine",
     user="postgres",
-    password="Doremon@123",
+    password="*********",
     port="5432"
 )
 
